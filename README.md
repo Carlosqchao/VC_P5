@@ -1,198 +1,151 @@
-## Práctica 5. Detección y caracterización de caras
+# VC_P5: Detector de caras y clasificador de emociones mediante CNN
 
-### Contenidos
+## Autores
 
-[Aspectos cubiertos](#51-aspectos-cubiertos)
-[Conjunto de datos](#conjunto-de-datos)  
-[Análisis facial](#análisis-facial)  
-[Tarea](#tarea)
+- Carlos Ruano Ramos
+- Juan Boissier García
+
+Estructura y flujo del notebook
+-------------------------------
+
+### Nota: El entrenamiento se realizó en Kaggle, el link del notebook del entrenamiento es: https://www.kaggle.com/code/carlosruanoramos/vc-p5
+
+1) Imports y dependencias
+   - Librerías principales importadas:
+     - numpy, matplotlib, seaborn
+     - sklearn.metrics: classification_report, confusion_matrix
+     - tensorflow/keras: modelos, capas, ImageDataGenerator, callbacks, load_model
+     - cv2 (OpenCV) para procesamiento de imágenes y webcam
+   - Comentario: asegúrate de tener ipykernel si usas Jupyter (el notebook muestra un aviso sobre ipykernel en una ejecución).
+
+2) Configuración de parámetros globales
+   - Rutas por defecto (configuradas para Kaggle):
+     - TRAIN_DIR = '/kaggle/input/fer2013/train'
+     - TEST_DIR  = '/kaggle/input/fer2013/test'
+   - Parámetros de entrenamiento:
+     - IMG_SIZE = 48
+     - BATCH_SIZE = 64
+     - EPOCHS = 50
+   - Clases/etiquetas:
+     - emotions = ['angry', 'disgust', 'fear', 'happy', 'neutral', 'sad', 'surprise']
+     - num_classes = 7
+
+3) Preparación de datos
+   - Se define train_datagen con ImageDataGenerator para data augmentation:
+     - rescale=1./255, rotation_range=15, width/height shift 0.1, shear 0.1, zoom 0.1, horizontal_flip=True, fill_mode='nearest'
+   - test_datagen solo con rescale=1./255.
+   - Generadores con flow_from_directory:
+     - color_mode='grayscale', target_size=(48,48), class_mode='categorical'
+   - El notebook imprime:
+     - class_indices (mapeo etiqueta → índice)
+     - número de muestras de entrenamiento y prueba
+   - Requisito: la estructura de carpetas debe ser TRAIN_DIR/<clase>/* y TEST_DIR/<clase>/*.
+
+4) Definición de la arquitectura CNN
+   - Función create_emotion_cnn() que devuelve un modelo keras.Sequential con:
+     - 4 bloques convolucionales progresivos (64 → 128 → 256 → 512 filtros)
+       - Cada bloque: Conv2D, BatchNormalization, Conv2D, BatchNormalization, MaxPooling2D, Dropout(0.25)
+     - Capas densas (clasificación):
+       - Flatten
+       - Dense(512, relu) + BatchNormalization + Dropout(0.5)
+       - Dense(256, relu) + BatchNormalization + Dropout(0.5)
+       - Dense(num_classes, softmax)
+   - Input shape: (48, 48, 1) (imágenes en escala de grises)
+
+5) Compilación y callbacks
+   - Compilación:
+     - optimizer: Adam(learning_rate=1e-4)
+     - loss: categorical_crossentropy
+     - metrics: ['accuracy']
+   - Callbacks configurados:
+     - EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
+     - ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5, min_lr=1e-7)
+     - ModelCheckpoint('best_emotion_model.h5', monitor='val_accuracy', save_best_only=True)
+   - Observación: EarlyStopping restaura pesos del mejor val_loss; ModelCheckpoint guarda según val_accuracy (pueden corresponder a distintas épocas).
+
+6) Entrenamiento
+   - model.fit(train_generator, epochs=EPOCHS, validation_data=test_generator, callbacks=callbacks)
+   - El historial se almacena en `history`.
+   - Al final se guarda el modelo completo con model.save('final_emotion_model.h5').
+
+7) Visualización del historial
+   - Se trazan y guardan (training_history.png):
+     - accuracy (train vs val)
+     - loss (train vs val)ç
+     <img width="1600" height="562" alt="image" src="https://github.com/user-attachments/assets/3c340495-6153-40da-ae19-e256c5978519" />
+
+8) Evaluación
+   - Se evalúa con model.evaluate(test_generator) y se imprimen test_loss y test_accuracy.
+   - Predicciones:
+     - predictions = model.predict(test_generator, steps=len(test_generator))
+     - y_pred = argmax(predictions, axis=1)
+     - y_true = test_generator.classes
+   - Se muestra classification_report con precision/recall/f1 por clase.
+   - Se genera y guarda la matriz de confusión (confusion_matrix.png) con seaborn heatmap.
+     <img width="1600" height="1354" alt="image" src="https://github.com/user-attachments/assets/b814a116-e0d8-4c22-8057-e979bb591a58" />
 
 
-### Detección de caras
+9) Función para predecir imágenes individuales
+   - predict_emotion(image_path):
+     - Carga imagen con keras.preprocessing.image.load_img(target_size=(48,48), color_mode='grayscale')
+     - Convierte a array, normaliza (/255), expande dimensiones y predice.
+     - Devuelve (etiqueta_emoción, confianza).
 
-Para esta práctica he preparado varios demostradores de detectores faciales. El primero de ellos, [*VC_P5_detectores.ipynb*](VC_P5_detectores.ipynb), integra cuatro variantes que buscan el rostro mayor de la imagen intentando localizar sus ojos para aplicar en su caso una normalización de tamaño y orientación:
+10) Módulo de inferencia en tiempo real (webcam)
+    - Carga del modelo: load_model('best_emotion_model.h5') (asegúrate de que exista).
+    - Mapeos:
+      - emotions = ['angry','disgust','fear','happy','neutral','sad','surprise']
+      - emotions_spanish = ['Cabreado','Asqueado','Asustado','Feliz','Neutral','Triste','Sorprendido']
+    - PNGs para overlay:
+      - Diccionario png_files mapeando índices a nombres de fichero (angry.jpg, disgust.png, etc.); el código intenta leerlos con cv2.IMREAD_UNCHANGED.
+      - Si faltan PNGs, se usan efectos alternativos (rectángulos, texto, círculos).
+    - Detector de rostros:
+      - face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+      - detectMultiScale con scaleFactor=1.3, minNeighbors=5, minSize=(30,30)
+    - Funciones principales:
+      - overlay_png_on_frame(frame, png, x, y, w, h, scale=1.0)
+        - Redimensiona, centra y mezcla PNG con canal alfa sobre el frame; gestiona recortes fuera del frame.
+      - add_emotion_effects(frame, emotion_idx, x, y, w, h, confidence)
+        - Si existe PNG para la emoción, la sobrepone y escribe texto con confianza.
+        - Si no, dibuja rectángulo coloreado, banner, texto, círculos y partículas decorativas.
+      - emotion_detection_thread()
+        - Captura frames de la webcam (cv2.VideoCapture(0)), detecta rostros, para cada rostro realiza:
+          - ROI grayscaling → resize a 48x48 → normalizar → expand dims → predict
+          - Selecciona la emoción con mayor confianza por frame
+          - Aplica efectos y muestra información principal en la parte superior
+        - Muestra la ventana OpenCV 'Deteccion de Emociones' y permite salir con 'q'.
+        - El notebook ejecuta este flujo en un hilo (threading.Thread) y espera con thread.join(timeout=300).
+    - Observación: la detección en tiempo real requiere entorno con GUI y acceso a la cámara (no funciona en servidores headless sin X11/Display).
 
-- Detector de Viola y Jones [Viola04-ijcv]. La detección de caras se incorpora en OpenCV desde la implementación de Rainer Lienhart [Lienhart02] del conocido, y hoy añejo, detector.
-- Detector de Kazemi et al. [Kazemi14]
-- Detector basado en Convolutional Neural Networks (CNNs) [Feng21]
-- Detector Multi-task Cascaded Convolutional Networks (MTCNN) [Zhang16]
+Archivos y salidas que genera el notebook
+----------------------------------------
+- best_emotion_model.h5  (guardado por ModelCheckpoint)
+- final_emotion_model.h5 (guardado manual al finalizar entrenamiento)
+- training_history.png
+- confusion_matrix.png
+- PNGs de overlays (opcional): angry.jpg, disgust.png, fear.png, happy.png, neutral.png, sadness.png, surprise.png
 
-Como primer paso, son necesarias algunas instalaciones de paquetes. Partiendo del *environment* *VC_P1* creado en la primera práctica, para ejecutar *VC_P5.ipynb* he necesitado instalar los siguientes paquetes:
+Problemas habituales y consejos para resolverlos
+------------------------------------------------
+- Rutas de datos: las rutas están puestas para Kaggle; ajústalas si ejecutas local.
+- Estructura de carpetas: flow_from_directory requiere subcarpetas por clase.
+- Faltan PNGs: el código imprime advertencias y usa fallback visual.
+- Falta ipykernel: instala ipykernel en el entorno para evitar avisos en Jupyter.
+- best_emotion_model.h5 puede no existir si el entrenamiento no produjo mejora; en ese caso carga final_emotion_model.h5 o revisa callbacks.
+- Haar cascade es sensible; para mayor robustez usa MTCNN, detector DNN de OpenCV o dlib.
+- Reproducibilidad: no se fijan seeds ni hay requirements.txt; añade ambos para reproducibilidad.
+
+Ejemplos de uso
+---------------
+- Ejecutar una predicción en una imagen:
+  ```python
+  emotion, confidence = predict_emotion('imagen_de_prueba.jpg')
+  print(f'Emoción detectada: {emotion} (Confianza: {confidence:.2%})')
+  ```
+
+- Ejecutar la detección en tiempo real:
+  - Asegúrate de tener `best_emotion_model.h5` en el directorio actual (o modifica el path para cargar `final_emotion_model.h5`).
+  - Ejecuta la celda correspondiente al módulo de webcam en un entorno con cámara. Presiona 'q' para salir.
 
 
-<!-- Problemas con ejemplo deepface_kfold tensorflow 2.5.0?-->  
 ```
-conda create --name VC_P5 python=3.11.5
-conda activate VC_P5
-pip install opencv-python
-pip install matplotlib
-pip install imutils
-pip install mtcnn
-pip install tensorflow   
-pip install deepface
-pip install tf-keras
-pip install cmake
-pip install dlib
-```
-
-Por la experiencia previa, el **paquete dlib suele ser el más problemático**, en ocasiones requiere que se instale la versión *Comunidad* de [*Microsoft C++ Build Tools*](https://visualstudio.microsoft.com/downloads/?q=build+tools). En el **caso de no resolverlo en poco tiempo, sugerir no instalar dlib**, y evitar el ejemplo [*VC_P5_detectores.ipynb*](VC_P5_detectores.ipynb), donde se alterna entre distintos detectores de caras y elementos faciales, y usar los demostradores que no incorpora el detector de dlib: [*VC_P5_VJs.ipynb*](VC_P5_VJs.ipynb) (combinación de detectores de Viola y Jones) y [*VC_P5_VJ_DNN_MTCNN.ipynb*](VC_P5_VJ_DNN_MTCNN.ipynb) (varios detectores, sin los disponbibles en dlib).
-
-
-Si no hay contratiempos, la ejecución de [*VC_P5_detectores.ipynb*](VC_P5_detectores.ipynb) debería ser posible, todas las dependencias están instaladas, pero falta asegurar que todos los clasificadores están presentes en el directorio local. Al ejecutar debería aparecer un error por un archivo no encontrado. En el repositorio [github](https://github.com/otsedom/otsedom.github.io/blob/main/VC/README.md), se incluyen todos los modelos necesarios con excepción de los modelos de máscaras faciales, más pesados, motivo por el cual se produce error al no disponer de los archivos *shape_predictor_5_face_landmarks.dat* y *shape_predictor_68_face_landmarks.dat*. Por su mencionado tamaño no se han incluido en el repositorio. Para poder ejecutar la demo, deben descargarse desde el enlace proporcionado en el campus virtual (opción aconsejada), o desde el [repositorio de archivos de dlib](http://dlib.net/files/).
-
-En primer término la implementación en OpenCV del detector de Viola y Jones [Viola04][Lienhart02] busca caras, en cuyo contenedor intenta localizar los ojos, aplicando la misma arquitectura de detector, pero adaptada al patrón ocular, por medio de los detectores entrenados años atrás en nuestro laboratorio [Castrillon11].
-Detectores faciales más recientes, tras detectar el rostro hacen uso de un modelo de sus elementos para encajarlo en la imagen utilizando como punto de partida un detector del rostro, intentando ajustar para cada cara detectada la máscara de puntos.
-Pulsando la tecla *d* cambias de detector, y para determinados detectores la tecla *e* permite alternar entre dos máscaras de puntos del rostro. Para este grupo de detectores, de mejor o peor forma se dibujan elementos faciales, desde cinco elementos, o en el caso mayor 68, correspondiendo a la indexación mostrada en la imagen a continuación.
-
-![Careto](images/landmarks.png)  
-*Máscara facial de 68 puntos con numeración*
-
-Dado que las máscaras tienen una numeración que permite el acceso a posiciones concretas, esta información se utiliza para normalizar la imagen (tamaño y orientación) en este ejemplo, pero puede utilizarse para otros fines como muestran las siguientes imágenes.
-
-![Careto](images/facemask2.png)  
-*Máscara sobre el rostro detectado*
-
-
-Un ejemplo final ilustra el uso de [deepface](https://github.com/serengil/deepface) como *wrapper* de distintos detectores. Si bien probablemenmte no optimiza los métodos, permite acceder a disntintas propuestas, tanto para detectar, como para analizar rostros (que veremos en la siguiente sección). El cuaderno [*VC_P5_detectores_deepface.ipynb*](VC_P5_detectores_deepface.ipynb), contiene una celda para detectar con RetinaFace, y otra que permite alternar entre varios. Un detector como RetinaFace, requiere mayores recursos, contar con GPU e instalar lo neecsario par ausar CUDA, se notará.
-
-<!-- Para usuarios linux y Mac, la retroalimentación de éxito que me ha llegado hasta ahora ha siso al instalar CUDA.--> 
-
-
-
-
-## Análisis facial
-
-Esta sección muestra opciones de clasificación supervisada del rostro detectaro. Como ejemplo ilustrativo, se hace uso de un conjunto de datos para varias de las demos descritas a continuación, en concreto **DatabaseGender59x65**, que puede **descargarse desde el campus virtual**. Tras descomprimir, observarás que contiene dos
-carpetas, dado que se asume un problema de dos clases: femenino y masculino.
-
-
-
-### Autocaras
-
-La primera de las demos está contenida en el archivo [*VC_P5_eigenfaces.ipynb*](VC_P5_eigenfaces.ipynb). Antes de lanzarla, debes modificar la ruta del conjunto de datos, para ajustarla a tu máquina. Al lanzarlo, a modo de resumen realiza las siguientes acciones:
-
-- Antes de nada, modifica la ruta especificada en el código en la variable *folder* para adaptarla a tu equipo
-- Carga el conjunto de datos sin aplicar ningún tipo de recorte, cada imagen se recompone como vector, obteniendo la matriz *X* con todas las muestras, y la matriz *Y* con sus etiquetas numéricas
-- Visualiza la primera muestra de cada clase y estadísticas del conjunto de datos
-- De forma aleatoria se divide en conjunto de datos en entrenamiento y test usando *train_test_split*, es un *hold-out* 70/30.
-- A continuación se realizan varios experimentos de clasificación:
-  - Utiliza el valor de los píxeles como vector de características, clasificando por mayoría entre los k vecinos más cercanos (k=5 en el código)
-  - Realiza el análisis de componentes principales del conjunto de entrenamiento, tomando las 150 primeras como vector de características, probando dos esquemas de clasificación:
-    - por mayoría entre los k vecinos más cercanos (k=5 en el código)
-    - utilizando una máquina de vectores soporte (SVM)
-  - Realiza el análisis de componentes principales del conjunto de entrenamiento, tomando las componentes que cubran el 95% de la varianza del conjunto. De nuevo prueba dos esquemas de clasificación:
-    - por mayoría entre los k vecinos más cercanos (k=5 en el código)
-    - utilizando una máquina de vectores soporte (SVM)
-
-
-![PCA](images/pca.png)  
-*Caras principales*
-
-Antes de la ejecución, es probable que requieras añadir algún paquete adicional al *environment*.
-
-```
-pip install scikit-learn
-pip install scikit-image
-```
-
-Tras la ejecución, para todas las variantes se muestran métricas y matriz de confusión. ¿Qué esquema consideras que es mejor?
-
-¿Qué ocurriría si se realiza el mismo proceso sobre una zona recortada de la imagen, por ejemplo te centras en la zona ocular. Comentar que las imágenes tienen un tamaño 59x65, habiendo sido normalizadas para que los ojos anotados/detectados estén en las posiciones (16,17) y (42,17).
-
-
-### Descriptores locales
-
-El segundo demostrador [*VC_P5_eigenfaces_handcrafted_kfold.ipynb*](VC_P5_eigenfaces_handcrafted_kfold.ipynb) diseña un experimento kfold, comparando el uso de autocaras con un par de configuraciones basadas en LBP y HOG.
-A modo de resumen realiza las siguientes acciones:
-
-- De nuevo, recuerda en primer lugar modificar la ruta especificada en el código en la variable *folder* para adaptarla a tu equipo
-- Carga el conjunto de datos sin aplicar ningún tipo de recorte, cada imagen se recompone como vector, obteniendo la matriz *X* con todas las muestras, y la matriz *Y* con sus etiquetas numéricas
-- Se visualizan varias muestras de cada clase y estadísticas del conjunto de datos
-- De forma aleatoria se divide en conjunto de datos en varios subconjuntos usando *StratifiedKFold* para diseñar el kfold
-- Realiza el análisis de componentes principales (PCA) del conjunto de entrenamiento, tomando las componentes que cubran el 95%de la varianza del conjunto
-- Posteriormente aplica los siguientes esquemas de clasificación:
-  - Clasifica con píxeles como características y KNN
-  - Clasifica con componentes PCA como características con KNN
-  - Clasifica con componentes PCA como características con SVM
-  - Clasifica con LBP como características con SVM
-  - Clasifica con HOG como características con SVM
-  - Clasificador aplicado (*stacked*) combinando los respectivos clasificadores SVM
-
-Además de la zona de interés del rostro, como en el ejemplo de la sección previa, la división en celdas para el cálculo de los histogramas HOG y LBP es configurable. Es por ello posible mejorar tasas de rendimiento, en particular si mejoramos los datos proporcionados al clasificador apilado.
-
-¿Te aventuras a probar otras combinaciones de región de interés y descriptores locales?
-
-
-### deepface
-
-La demo contenida en [*VC_P5_deepface_kfold.ipynb*](VC_P5_deepface_kfold.ipynb) es similar a la del apartado previo, plantea un experimento kfold, tomando en este caso como características los *embeddings* proporcionados por uno de los modelos presentes en deepface. En concreto he tomado FaceNet, si bien el código está preparado para escoger otro modelo antes de realizar la carga de datos. Al cargar los datos se obtiene el correspondiente *embedding* que se almacena en *X*, siendo por ello el proceso de carga más lento. En la primera ejecución se descargará el modelo si fuera necesario, siendo almacenado en la carpeta *.deepface*. Tenlo presente si vas justo de disco.
-
-Posteriormente se lanza el experimento kfold. ¿Qué te parecen los resultados?
-¿Qué ocurre con otros modelos?
-
-<!-- Sin embargo, quiero mostrar una demo, [*Demo_BuscaParecidos.py*](Demo_BuscaParecidos.py), que busca parecidos en un conjunto de caras a partir de distancias obtenidas con *embeddings* de FaceNet. Advierto que es una demo compuesta en ratos libres durante sesiones de actividades de divulgación bajo alguna carpa en una plaza, por lo que pueden existir errores.
-Un proceso similar es el que está detrás de [Art selfie](https://artsandculture.google.com/camera/selfie).-->
-
-Deepface además de detectar caras, dispone de utilidades para reconocimiento, descripción y estimación de la expresión facial, que puedes ver en su web.
-mencionar utilizades para verificación y reconocimiento de identidad. En ambos casos se le proporciona dos parámetros:
-
-- Para verificar, se proporcionan dos imágenes
-- Para reconocer una imagen y la ruta  a la carpeta con la base de datos de identidades registradas.
-
-En el último ejemplo, se ilustra brevemente la utilidad de descripción facial a través de la función *analyze* que permite estimar:
-
-- identidad
-- sexo
-- raza
-- emoción
-
-En los dos últimos casos proporciona probabilidades de cada clase considerada, además de la ganadora. Un pequeño ejemplo es el incluido en [*VC_P5_deepface_analyze.ipynb*](VC_P6_deepface_analyze.ipynb). Tener presente, que cada modalidad requiere la descarga de modelos en su primera ejecución. 
-
-
-## Tarea
-
-Tras mostrar opciones para la detección y extracción de información de caras humanas con deepface, la tarea a entregar consiste en proponer dos escenarios de aplicación y desarrollar dos prototipos de temática libre que provoquen *reacciones* a partir de la información extraída del rostro. Uno de los prototipos deberá incluir el uso de algún modelo entrenado por ustedes para la extracción de información biometríca, similar al ejemplo del género planteado durante la práctica pero con diferente aplicación (emociones, raza, edad...). El otro es de temática completamente libre. 
-
-Los detectores proporcionan información del rostro, y de sus elementos faciales. Ideas inmediatas pueden ser filtros, aunque no hay limitaciones en este sentido. La entrega debe venir acompañada de un gif animado o vídeo de un máximo de 30 segundos con momentos seleccionados de las propuestas. Las propuestas se utilizarán para una posterior votación y elección de las mejores entre el grupo. El podio del curso pasado:
-
-
-![AJ](images/AlejandroJoaquin2324.gif)  
-*Alejandro y Joaquín*
-
-![DI](images/DanielIvan2324.gif)  
-*Daniel e Iván*
-
-![DJ](images/DanielJorge2324.gif)  
-*Daniel y Jorge*
-
-Recomendar también propuestas como:
-
-<!--Además de la demo mostrada de parecidos,
-recomendar la lectura de [Working with Faces](https://kcimc.medium.com/working-with-faces-e63a86391a93) por [Kyle McDonald](https://kylemcdonald.net), y ver propuestas como:-->
-
-- [Sharing Faces](https://vimeo.com/96549043) de [Kyle McDonald](https://kylemcdonald.net)
-- [Más Que la Cara](https://zachlieberman.medium.com/más-que-la-cara-overview-48331a0202c0) de Zach Lieberman
-- [Art selfie](https://artsandculture.google.com/camera/selfie)
-
-
-
-
-<!--
-
-La instalación debida a Zach Lieberman titulada [Más Que la Cara](https://zachlieberman.medium.com/más-que-la-cara-overview-48331a0202c0) puede dar otra fuente de inspiración. La utilidad [FaceOSC de Kyle McDonald](https://vimeo.com/26098366) también sugiere usos.
-
-Tampoco hay limitación sobre el detector concreto a utilizar, acepto la utilización de otras herramientas. En este sentido puede interesarles echar un vistazo a [Mediapipe](https://google.github.io/mediapipe/).-->
-
-
-## Referencias
-
-[Castrillon11] Modesto Castrillón, Oscar Déniz, Daniel Hernández, and Javier Lorenzo. A comparison of face  and facial feature detectors based on the violajones general object detection framework. Machine Vision and Applications,2011.  
-[Feng21] Yuantao Feng and Shiqi Yu and Hanyang Peng and Yan-ran Li and Jianguo Zhang. Detect Faces Efficiently: A Survey and Evaluations. IEEE Transactions on Biometrics, Behavior, and Identity Science, 2021
-[Kazemi14] Vahid Kazemi and Josephine Sullivan. One Millisecond Face Alignment with an Ensemble of Regression Trees. In IEEE Conference on Computer Vision and Pattern Recognition, 2014
-[Lienhart02] Rainer Lienhart and Jochen Maydt. An extended set of Haar-like features for rapid object detection. ICIP 2002  
-[Viola04] Paul Viola and Michael J. Jones. Robust real-time face detection. International Journal of Computer Vision, 2004  
-[Zhang16] Zhang, K., Zhang, Z., Li, Z., and Qiao, Y. Joint face detection and alignment using multitask cascaded convolutional networks. IEEE Signal Processing Letters, 2016
-
-
-***
-Bajo licencia de Creative Commons Reconocimiento - No Comercial 4.0 Internacional
