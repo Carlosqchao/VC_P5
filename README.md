@@ -60,6 +60,9 @@ Filtro A — Overlay PNG con canal alfa
   - En cada frame, si existe el PNG correspondiente a la emoción detectada, se invoca esta función para superponer el asset.
 - Recursos generados/esperados:
   - PNGs de overlays opcionales: angry.jpg, disgust.png, fear.png, happy.png, neutral.png, sadness.png, surprise.png.
+  ### Video
+  - [![Ver video](./Assets/thumbnail.png)](./video2.mp4)
+
 
 Filtro B — Efectos gráficos (fallback)
 - Qué hace:
@@ -83,6 +86,7 @@ Detalles comunes a la inferencia en tiempo real
   - Se aplica el filtro correspondiente (Overlay PNG o Efectos fallback) y se renderiza texto con la emoción y la confianza.
 - Ejecución:
   - Captura de vídeo con cv2.VideoCapture(0) y procesamiento, con la posibilidad de ejecutar la inferencia en un hilo separado mediante threading.Thread.
+  - ![gif1](https://github.com/user-attachments/assets/a1dbbe68-7068-46d0-814d-a0e6a48bb611)
 
 Salidas y artefactos generados
 ------------------------------
